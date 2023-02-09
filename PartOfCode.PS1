@@ -41,14 +41,14 @@ Class MSIContent {
     [GUID]      ${UPGRADECODE}
     [String]    ${ARPPRODUCTICON}
     [MSIIcon]   ${ProductIcon}
-    MSIContent ($MSIFilePath){
-        [MSIFile] $MSIFilePath = $MSIFilePath
+    MSIContent ($MSIPath){
+        $MSIFilePath = Get-Item -path $MSIPath # MSI should be unique
         $This.ReadDatabase($MSIFilePath,@())
         $This.ProductIcon = $This.GetIcon($MSIFilePath)
     }
-    MSIContent ($MSIPath,$MSTsPath){
+    MSIContent ($MSIPath,$MSTPaths){
         $MSIFilePath = Get-Item -path $MSIPath # MSI should be unique
-        $MSTFilesPath = $MSTsPath | Get-Item # There can be several MST Files
+        $MSTFilesPath = $MSTPaths | Get-Item # There can be several MST Files
         $This.ReadDatabase($MSIFilePath,$MSTFilesPath)
         $This.ProductIcon = $This.GetIcon($MSIFilePath)
     }
