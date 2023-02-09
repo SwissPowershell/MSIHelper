@@ -120,12 +120,12 @@ Class MSIContent {
             try {
                 [String] $IconName = $Record.GetType().InvokeMember("StringData", "GetProperty", $null, $Record, 1)
                 $DataSize = $Record.GetType().InvokeMember("DataSize", "GetProperty", $null, $Record, 2)
-                if ($IconName.EndsWith('.ico') -eq $False) {
-                    if ($IconName.EndsWith('.exe') -eq $False) {
-                        $IconName = "$IconName.ico"
-                    }
+                if (($IconName.EndsWith('.ico') -eq $False) -and ($IconName.EndsWith('.exe') -eq $False)) {
+                    # no file type or not ico or exe assume the file is readable using ico approach
+		    $IconName = "$IconName.ico"
                 }
                 if ($IconName.EndsWith('.exe') -eq $True){
+		    # The file will be an exe so the icon have to be extracted from that exe using [System.Drawing.Icon]::ExtractAssociatedIcon method 
                     $TempFile = New-TemporaryFile
                     $Stream = $Record.GetType().InvokeMember("ReadStream","InvokeMethod",$Null,$Record,@(2, $DataSize, $msiReadStreamAnsi))
                     $FileStream = new-object IO.FileStream($TempFile.FullName, [IO.FileMode]::Create) # New FileStream to some file
@@ -135,17 +135,14 @@ Class MSIContent {
                     $FileStream.Close() # Close stream
                     #New Behavior integrate the .ico
                     $ico =  [System.Drawing.Icon]::ExtractAssociatedIcon("$($TempFile.FullName)")
-
                     $Ico.ToBitmap().Save("$($TempFile.FullName)")
                     $EncodedData = [convert]::ToBase64String((Get-Content -Path $TempFile.FullName -Encoding Byte))
                     $Icon.Content = $EncodedData
                     $Icon.Name =$IconName -Replace '.exe','.ico'
                     $this.MSIIcon = $Icon
-                    #$EncodedData = [Convert]::ToBase64String([IO.File]::ReadAllBytes($TempFile.FullName))
-                    #$Icon.Name = $IconName
-                    #$Icon.Content = $EncodedData
                     $TempFile.Delete()
                 }ElseIf ($IconName.EndsWith('.ico') -eq $True) {
+		    # The file is allready of image type
                     $TempFile = New-TemporaryFile
                     $Stream = $Record.GetType().InvokeMember("ReadStream","InvokeMethod",$Null,$Record,@(2, $DataSize, $msiReadStreamAnsi))
                     $FileStream = new-object IO.FileStream($TempFile.FullName, [IO.FileMode]::Create) # New FileStream to some file
