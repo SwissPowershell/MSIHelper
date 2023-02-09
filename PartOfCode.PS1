@@ -46,9 +46,9 @@ Class MSIContent {
         $This.ReadDatabase($MSIFilePath,@())
         $This.ProductIcon = $This.GetIcon($MSIFilePath)
     }
-    MSIContent ($MSIFilePath,$MSTFilesPath){
-        [MSIFile] $MSIFilePath = $MSIFilePath
-        [MSIFile[]] $MSTFilesPath = $MSTFilesPath
+    MSIContent ($MSIPath,$MSTsPath){
+        $MSIFilePath = Get-Item -path $MSIPath # MSI should be unique
+        $MSTFilesPath = $MSTsPath | Get-Item # There can be several MST Files
         $This.ReadDatabase($MSIFilePath,$MSTFilesPath)
         $This.ProductIcon = $This.GetIcon($MSIFilePath)
     }
