@@ -10,7 +10,7 @@ AAABAAQAEBAQAAEABAAoAQAARgAAABAQAAABAAgAaAUAAG4BAAAgIBAAAQAEAOgCAADWBgAAICAAAAEA
         $This.Name = Split-Path $Path -Leaf
         $Bytes = [IO.File]::ReadAllBytes($Path)
         $This.Content = [Convert]::ToBase64String($Bytes)
-	$This.FullName = $Path
+				$This.FullName = $Path
     }
     MSIIcon ($Name,$Content){
         $This.Name = $Name
@@ -24,7 +24,7 @@ AAABAAQAEBAQAAEABAAoAQAARgAAABAQAAABAAgAaAUAAG4BAAAgIBAAAQAEAOgCAADWBgAAICAAAAEA
         }Catch {
             #Set-Content -Path $IconFullName -Value $This.Content -ErrorAction Stop
         }
-	$This.FullName = $IconFullName
+				$This.FullName = $IconFullName
     }
     [Void] Save($Path){
         $This.Save($Path,$This.Name)
