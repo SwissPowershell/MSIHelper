@@ -41,18 +41,26 @@ Class MSIFile {
     [GUID]      ${UPGRADECODE}
     [String]    ${ARPPRODUCTICON}
     [MSIIcon]   ${ProductIcon}
-    MSIFile ($MSIPath){
+    hidden [System.IO.File] $__msiFilePath
+    hidden [System.IO.File[]] $__mstFilesPath
+    MSIFile () {
+        $this.ProductIcon = [MSIIcon]::new()
+    }
+    MSIFile ([System.IO.File]$MSIPath){
         $MSIFilePath = Get-Item -path $MSIPath # MSI should be unique
         $This.__readValues($MSIFilePath,@())
-        $This.ProductIcon = $This.__getIcon($MSIFilePath)
+        $This.ProductIcon = $This.__getIcon()
     }
-    MSIFile ($MSIPath,$MSTPaths){
-        $MSIFilePath = Get-Item -path $MSIPath # MSI should be unique
-        $MSTFilesPath = $MSTPaths | Get-Item # There can be several MST Files
-        $This.__readValues($MSIFilePath,$MSTFilesPath)
-        $This.ProductIcon = $This.__getIcon($MSIFilePath)
+    MSIFile ([System.IO.File] $MSIPath,[System.IO.File[]]$MSTPaths){
+        $this.__msiFilePath = Get-Item -path $MSIPath # MSI should be unique
+        $this.__mstFilesPath = $MSTPaths | Get-Item # There can be several MST Files
+        $This.__readValues()
+        $This.ProductIcon = $This.__getIcon()
     }
-    hidden [Void] __readValues($MSIFilePath,$MSTFilesPath){
+    hidden [Void] __readValues() {
+        $This.__readValues($this.__msiFilePath,$this.__mstFilesPath)
+    }
+    hidden [Void] __readValues([System.IO.File] $MSIFilePath,[System.IO.File[]] $MSTFilesPath){
         # the properties to extract
         $PropertiesName = @('ProductName','ProductVersion','Manufacturer','ProductCode','UpgradeCode','ARPPRODUCTICON')
         $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
@@ -101,7 +109,10 @@ Class MSIFile {
         $MSIDatabase = $null
         $View = $null
     }
-    hidden [MSIIcon] __getIcon($MSIFilePath){
+    hidden [MSIIcon] __getIcon(){
+        return $This.__getIcon($this.__msiFilePath)
+    }
+    hidden [MSIIcon] __getIcon([System.IO.File] $MSIFilePath){
         $Icon = [MSIIcon]::new() # Default Icon at worst case this will be the default MSI Icon returned
         $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
         $MSIDatabase = $WindowsInstaller.GetType().InvokeMember('OpenDatabase','InvokeMethod', $null, $WindowsInstaller, @($MSIFilePath.FullName,0))
@@ -140,7 +151,7 @@ Class MSIFile {
                     $EncodedData = [convert]::ToBase64String((Get-Content -Path $TempFile.FullName -Encoding Byte))
                     $Icon.Content = $EncodedData
                     $Icon.Name =$IconName -Replace '.exe','.ico'
-                    $this.MSIIcon = $Icon
+                    # $this.MSIIcon = $Icon
                     $TempFile.Delete()
                 }ElseIf ($IconName.EndsWith('.ico') -eq $True) {
                     # The file is allready of image type
@@ -154,11 +165,11 @@ Class MSIFile {
                     $EncodedData = [Convert]::ToBase64String([IO.File]::ReadAllBytes($TempFile.FullName)) # Convert the file to base64
                     $Icon.Name = $IconName
                     $Icon.Content = $EncodedData
-                    $this.MSIIcon = $Icon
+                    # $this.MSIIcon = $Icon
                     $TempFile.Delete()
                 }
             }catch {
-                #Throw $_
+                Throw $_
             }
             return $Icon
         }else{
@@ -168,13 +179,31 @@ Class MSIFile {
     }
 }
 Function Get-MSIFile {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='_byFile')]
     Param (
-        [Parameter(Mandatory=$True,Position=0)]
-        [String] $MSIPath,
-        [Parameter(Mandatory=$False,Position=1)]
+        [Parameter(Mandatory=$True,Position=0,ValueFromPipeline=$True,ParameterSetName='_byPath')]
+        [System.IO.Path] ${Path},
+        [Parameter(Mandatory=$True,Position=0,ValueFromPipeline=$True,ParameterSetName='_byFile')]
+        [ValidateScript({(Test-Path $_ -PathType Leaf) -and ($_.Extension -eq '.msi')})]
+        [Alias('FullName','MSI','MSIPath')]
+        [System.IO.File] ${FilePath},
+        [Parameter(Mandatory=$False,Position=1,ParameterSetName='_byFile')]
+        [ValidateScript({($_ | Test-Path -PathType Leaf) -and ($_.Extension | ForEach-Object {$_ -eq '.mst'})})]
+        [Alias('MST')]
         [String[]] $MSTPaths
     )
-    $MSI = [MSIFile]::new($MSIPath,$MSTPaths)
+    if ($PSCmdlet.ParameterSetName -eq '_byPath') {
+        $MSIFiles = @(Get-ChildItem -Path $Path  -File -Recurse -Filter '*.msi')
+        $MSTFiles = @(Get-ChildItem -Path $Path  -File -Recurse -Filter '*.mst')
+        if ($MSIFiles.Count -gt 1) {
+            Write-Warning "The path [$Path] contains more than one MSI file, only the first one will be processed"
+        }Elseif($MSIFiles.Count -eq 0) {
+            Write-Error "No MSI file found in the path [$($Path)]"
+            Return
+        }
+        $MSI = [MSIFile]::new($MSTFiles[0],$MSTFiles)
+    }Else{
+        $MSI = [MSIFile]::new($FilePath,$MSTPaths)
+    }
     Return $MSI
 }
