@@ -177,6 +177,27 @@ Class MSIFile {
             Return $Icon
         }
     }
+    [String] GetDefaultInstallCommand(){
+        $Command = "msiexec /i $($this.__msiFilePath.FullName) /qn"
+        return $Command
+    }
+    [String] GetDefaultInstallCommand([System.IO.File] $LogFile){
+        $Command = "msiexec /i $($this.__msiFilePath.FullName) /qn /l*v+ $($LogFile.FullName)"
+        return $Command
+    }
+    [String] GetDefaultUninstallCommand(){
+        $Command = "msiexec /x $($this.PRODUCTCODE) /qn"
+        return $Command
+    }
+    [String] GetDefaultUninstallCommand([System.IO.File] $LogFile){
+        $Command = "msiexec /x $($this.PRODUCTCODE) /qn /l*v+ $($LogFile.FullName)"
+        return $Command
+    }
+    [Boolean] IsInstalled(){
+        $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+        $InstalledProducts = $WindowsInstaller.GetType().InvokeMember('Products', 'GetProperty', $null, $WindowsInstaller, $null)
+        Return $This.PRODUCTCODE -in $InstalledProducts
+    }
 }
 Function Get-MSIFile {
     [CmdletBinding(DefaultParameterSetName='_byFile')]
@@ -207,3 +228,41 @@ Function Get-MSIFile {
     }
     Return $MSI
 }
+
+# register the classes
+# Define the types to export with type accelerators.
+$ExportableTypes =@(
+    [MSIIcon],[MSIFile]
+)
+# Get the internal TypeAccelerators class to use its static methods.
+$TypeAcceleratorsClass = [PSObject].Assembly.GetType(
+    'System.Management.Automation.TypeAccelerators'
+)
+# Ensure none of the types would clobber an existing type accelerator.
+# If a type accelerator with the same name exists, throw an exception.
+$ExistingTypeAccelerators = $TypeAcceleratorsClass::Get
+ForEach ($Type in $ExportableTypes) {
+    if ($Type.FullName -in $ExistingTypeAccelerators.Keys) {
+        $Message = @(
+            "Unable to register type accelerator '$($Type.FullName)'"
+            'Accelerator already exists.'
+        ) -join ' - '
+
+        Throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new($Message),
+            'TypeAcceleratorAlreadyExists',
+            [System.Management.Automation.ErrorCategory]::InvalidOperation,
+            $Type.FullName
+        )
+    }
+}
+# Add type accelerators for every exportable type.
+ForEach ($Type in $ExportableTypes) {
+    $TypeAcceleratorsClass::Add($Type.FullName, $Type)
+}
+# Remove type accelerators when the module is removed.
+$MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
+    foreach($Type in $ExportableTypes) {
+        $TypeAcceleratorsClass::Remove($Type.FullName)
+    }
+}.GetNewClosure()
