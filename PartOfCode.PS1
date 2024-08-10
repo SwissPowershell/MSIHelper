@@ -43,92 +43,92 @@ Class MSIContent {
     [MSIIcon]   ${ProductIcon}
     MSIContent ($MSIPath){
         $MSIFilePath = Get-Item -path $MSIPath # MSI should be unique
-        $This.ReadDatabase($MSIFilePath,@())
-        $This.ProductIcon = $This.GetIcon($MSIFilePath)
+        $This.__readValues($MSIFilePath,@())
+        $This.ProductIcon = $This.__getIcon($MSIFilePath)
     }
     MSIContent ($MSIPath,$MSTPaths){
         $MSIFilePath = Get-Item -path $MSIPath # MSI should be unique
         $MSTFilesPath = $MSTPaths | Get-Item # There can be several MST Files
-        $This.ReadDatabase($MSIFilePath,$MSTFilesPath)
-        $This.ProductIcon = $This.GetIcon($MSIFilePath)
+        $This.__readValues($MSIFilePath,$MSTFilesPath)
+        $This.ProductIcon = $This.__getIcon($MSIFilePath)
     }
-    hidden [Void] ReadDatabase($MSIFilePath,$MSTFilesPath){
-    	# the properties to extract
+    hidden [Void] __readValues($MSIFilePath,$MSTFilesPath){
+        # the properties to extract
         $PropertiesName = @('ProductName','ProductVersion','Manufacturer','ProductCode','UpgradeCode','ARPPRODUCTICON')
         $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
-        $MSIDatabase = $WindowsInstaller.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $WindowsInstaller, @($MSIFilePath.FullName, 0))
+        $MSIDatabase = $WindowsInstaller.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $WindowsInstaller, @($MSIFilePath.FullName, 0))
         $IsUsingTransform = $False
         if ($MSTFilesPath.count -ne 0) {
             $IsUsingTransform = $True
             ForEach ($MSTFile in $MSTFilesPath) {
-	    	# Apply each of the transform in the given order in case the properties are overwritten by the MST
-                $MSIDatabase.GetType().InvokeMember("ApplyTransform","InvokeMethod",$null,$MSIDatabase,@($MSTFile.FullName,0x0100))
+                # Apply each of the transform in the given order in case the properties are overwritten by the MST
+                $MSIDatabase.GetType().InvokeMember('ApplyTransform','InvokeMethod',$null,$MSIDatabase,@($MSTFile.FullName,0x0100))
             }
         }
         $View = $Null
         #Read the MSI Properties
         ForEach ($Property in $PropertiesName) {
             $Query = "SELECT Value FROM Property WHERE Property = '$($Property)'"
-            $View = $MSIDatabase.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $MSIDatabase, ($Query))
-            $View.GetType().InvokeMember("Execute", "InvokeMethod", $null, $View, $null) | out-null
-            $Record = $View.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $View, $null)
+            $View = $MSIDatabase.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $MSIDatabase, ($Query))
+            $View.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $View, $null) | out-null
+            $Record = $View.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $View, $null)
             try {
-                $Value = $Record.GetType().InvokeMember("StringData", "GetProperty", $null, $Record, 1)
+                $Value = $Record.GetType().InvokeMember('StringData', 'GetProperty', $null, $Record, 1)
                 $This.$Property = ($Value.replace('\','_')).replace('/','_')
             }catch {
                 Write-Warning "Unable to read property [$($Property)] from MSI File : $_"
             }
-            $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $View, $null)
+            $view.GetType().InvokeMember('Close', 'InvokeMethod', $null, $View, $null)
         }
         if ($IsUsingTransform -eq $True) {
             #Read eventual change made to these properties in the MST, transform change are stored in _TransformView table
             ForEach ($Property in $PropertiesName) {
                 $Value = $Null
                 $Query = "SELECT Data FROM _TransformView WHERE Row = '$($Property)'"
-                $View = $MSIDatabase.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $MSIDatabase, ($Query))
-                $View.GetType().InvokeMember("Execute", "InvokeMethod", $null, $View, $null) | out-null
-                $Record = $View.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $View, $null)
+                $View = $MSIDatabase.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $MSIDatabase, ($Query))
+                $View.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $View, $null) | out-null
+                $Record = $View.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $View, $null)
                 try {
-                    $Value = $Record.GetType().InvokeMember("StringData", "GetProperty", $null, $Record, 1)
+                    $Value = $Record.GetType().InvokeMember('StringData', 'GetProperty', $null, $Record, 1)
                     Write-Warning "INFO : The property [$($Property)] is overriden in an MST [$($This.$Property)] => [$($Value)]"
                     $This.$Property = $Value
                 }catch {
                 }
             }
         }
-        $MSIDatabase.GetType().InvokeMember("Commit", "InvokeMethod", $null, $MSIDatabase, $null) | out-null
-        $View.GetType().InvokeMember("Close", "InvokeMethod", $null, $View, $null) | Out-Null
+        $MSIDatabase.GetType().InvokeMember('Commit', 'InvokeMethod', $null, $MSIDatabase, $null) | out-null
+        $View.GetType().InvokeMember('Close', 'InvokeMethod', $null, $View, $null) | Out-Null
         $MSIDatabase = $null
         $View = $null
     }
-    hidden [MSIIcon] GetIcon($MSIFilePath){
+    hidden [MSIIcon] __getIcon($MSIFilePath){
         $Icon = [MSIIcon]::new()
         $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
-        $MSIDatabase = $WindowsInstaller.GetType().InvokeMember("OpenDatabase","InvokeMethod", $null, $WindowsInstaller, @($MSIFilePath.FullName,0))
+        $MSIDatabase = $WindowsInstaller.GetType().InvokeMember('OpenDatabase','InvokeMethod', $null, $WindowsInstaller, @($MSIFilePath.FullName,0))
         $Query = "SELECT Name, Data FROM Icon WHERE Name = '$($This.ARPPRODUCTICON)'"
         $IconRetrieved = $False
         $View = $Null
         Try {
-            $View = $MSIDatabase.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $MSIDatabase, ($Query))
+            $View = $MSIDatabase.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $MSIDatabase, ($Query))
             $IconRetrieved = $True
         }Catch {
             $IconRetrieved = $False
         }
         if ($IconRetrieved -eq $True) {
-            $View.GetType().InvokeMember("Execute", "InvokeMethod", $null, $View, $null) | out-null
-            $Record = $View.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $View, $null)
+            $View.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $View, $null) | out-null
+            $Record = $View.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $View, $null)
             $msiReadStreamAnsi = 1
             try {
-                [String] $IconName = $Record.GetType().InvokeMember("StringData", "GetProperty", $null, $Record, 1)
-                $DataSize = $Record.GetType().InvokeMember("DataSize", "GetProperty", $null, $Record, 2)
+                [String] $IconName = $Record.GetType().InvokeMember('StringData', 'GetProperty', $null, $Record, 1)
+                $DataSize = $Record.GetType().InvokeMember('DataSize', 'GetProperty', $null, $Record, 2)
                 if (($IconName.EndsWith('.ico') -eq $False) -and ($IconName.EndsWith('.exe') -eq $False)) {
                     # no file type or not ico or exe assume the file is readable using ico approach
-		    $IconName = "$IconName.ico"
+                    $IconName = "$($IconName).ico"
                 }
                 if ($IconName.EndsWith('.exe') -eq $True){
-		    # The file will be an exe so the icon have to be extracted from that exe using [System.Drawing.Icon]::ExtractAssociatedIcon method 
+                    # The file will be an exe so the icon have to be extracted from that exe using [System.Drawing.Icon]::ExtractAssociatedIcon method 
                     $TempFile = New-TemporaryFile
-                    $Stream = $Record.GetType().InvokeMember("ReadStream","InvokeMethod",$Null,$Record,@(2, $DataSize, $msiReadStreamAnsi))
+                    $Stream = $Record.GetType().InvokeMember('ReadStream','InvokeMethod',$Null,$Record,@(2, $DataSize, $msiReadStreamAnsi))
                     $FileStream = new-object IO.FileStream($TempFile.FullName, [IO.FileMode]::Create) # New FileStream to some file
                     $StreamWriter = new-object IO.StreamWriter($FileStream,[System.Text.Encoding]::GetEncoding(28591)) # A streamwriter will write to the file via filestream above
                     $StreamWriter.WriteLine($Stream) # Write stuff to the file via streamwriter
@@ -143,9 +143,9 @@ Class MSIContent {
                     $this.MSIIcon = $Icon
                     $TempFile.Delete()
                 }ElseIf ($IconName.EndsWith('.ico') -eq $True) {
-		    # The file is allready of image type
+                    # The file is allready of image type
                     $TempFile = New-TemporaryFile
-                    $Stream = $Record.GetType().InvokeMember("ReadStream","InvokeMethod",$Null,$Record,@(2, $DataSize, $msiReadStreamAnsi))
+                    $Stream = $Record.GetType().InvokeMember('ReadStream','InvokeMethod',$Null,$Record,@(2, $DataSize, $msiReadStreamAnsi))
                     $FileStream = new-object IO.FileStream($TempFile.FullName, [IO.FileMode]::Create) # New FileStream to some file
                     $StreamWriter = new-object IO.StreamWriter($FileStream,[System.Text.Encoding]::GetEncoding(28591)) # A streamwriter will write to the file via filestream above
                     $StreamWriter.WriteLine($Stream) # Write stuff to the file via streamwriter
