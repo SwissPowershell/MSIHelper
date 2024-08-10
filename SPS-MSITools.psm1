@@ -30,7 +30,7 @@ AAABAAQAEBAQAAEABAAoAQAARgAAABAQAAABAAgAaAUAAG4BAAAgIBAAAQAEAOgCAADWBgAAICAAAAEA
         $This.Save($Path,$This.Name)
     }
     [String] ToString() {
-        Return $This.Name
+        Return "$($This.Name) -- $($This.Content.Substring(0,20))..."
     }
 }
 Class MSIFile {
@@ -41,30 +41,36 @@ Class MSIFile {
     [GUID]      ${UPGRADECODE}
     [String]    ${ARPPRODUCTICON}
     [MSIIcon]   ${ProductIcon}
-    hidden [System.IO.File] $__msiFilePath
-    hidden [System.IO.File[]] $__mstFilesPath
+    hidden [System.IO.FileInfo] $__msiFilePath
+    hidden [System.IO.FileInfo[]] $__mstFilesPath
     MSIFile () {
         $this.ProductIcon = [MSIIcon]::new()
     }
-    MSIFile ([System.IO.File]$MSIPath){
+    MSIFile ([System.IO.FileInfo]$MSIPath){
         $MSIFilePath = Get-Item -path $MSIPath # MSI should be unique
         $This.__readValues($MSIFilePath,@())
         $This.ProductIcon = $This.__getIcon()
     }
-    MSIFile ([System.IO.File] $MSIPath,[System.IO.File[]]$MSTPaths){
+    MSIFile ([System.IO.FileInfo] $MSIPath,[System.IO.FileInfo[]]$MSTPaths){
         $this.__msiFilePath = Get-Item -path $MSIPath # MSI should be unique
-        $this.__mstFilesPath = $MSTPaths | Get-Item # There can be several MST Files
+        $this.__mstFilesPath = $MSTPaths | Get-Item -ErrorAction Ignore # There can be several MST Files
         $This.__readValues()
         $This.ProductIcon = $This.__getIcon()
     }
     hidden [Void] __readValues() {
         $This.__readValues($this.__msiFilePath,$this.__mstFilesPath)
     }
-    hidden [Void] __readValues([System.IO.File] $MSIFilePath,[System.IO.File[]] $MSTFilesPath){
+    hidden [Void] __readValues([System.IO.FileInfo] $MSIFilePath,[System.IO.FileInfo[]] $MSTFilesPath){
         # the properties to extract
         $PropertiesName = @('ProductName','ProductVersion','Manufacturer','ProductCode','UpgradeCode','ARPPRODUCTICON')
         $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
-        $MSIDatabase = $WindowsInstaller.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $WindowsInstaller, @($MSIFilePath.FullName, 0))
+        try {
+            $MSIDatabase = $WindowsInstaller.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $WindowsInstaller, @($MSIFilePath.FullName, 0))
+        }Catch{
+            Write-Warning 'Unable to open the MSI File be sure the file is not open in another application'
+            return
+        }
+        
         $IsUsingTransform = $False
         if ($MSTFilesPath.count -ne 0) {
             $IsUsingTransform = $True
@@ -112,7 +118,7 @@ Class MSIFile {
     hidden [MSIIcon] __getIcon(){
         return $This.__getIcon($this.__msiFilePath)
     }
-    hidden [MSIIcon] __getIcon([System.IO.File] $MSIFilePath){
+    hidden [MSIIcon] __getIcon([System.IO.FileInfo] $MSIFilePath){
         $Icon = [MSIIcon]::new() # Default Icon at worst case this will be the default MSI Icon returned
         $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
         $MSIDatabase = $WindowsInstaller.GetType().InvokeMember('OpenDatabase','InvokeMethod', $null, $WindowsInstaller, @($MSIFilePath.FullName,0))
@@ -181,7 +187,7 @@ Class MSIFile {
         $Command = "msiexec /i $($this.__msiFilePath.FullName) /qn"
         return $Command
     }
-    [String] GetDefaultInstallCommand([System.IO.File] $LogFile){
+    [String] GetDefaultInstallCommand([System.IO.FileInfo] $LogFile){
         $Command = "msiexec /i $($this.__msiFilePath.FullName) /qn /l*v+ $($LogFile.FullName)"
         return $Command
     }
@@ -189,29 +195,40 @@ Class MSIFile {
         $Command = "msiexec /x $($this.PRODUCTCODE) /qn"
         return $Command
     }
-    [String] GetDefaultUninstallCommand([System.IO.File] $LogFile){
+    [String] GetDefaultUninstallCommand([System.IO.FileInfo] $LogFile){
         $Command = "msiexec /x $($this.PRODUCTCODE) /qn /l*v+ $($LogFile.FullName)"
         return $Command
     }
     [Boolean] IsInstalled(){
-        $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
-        $InstalledProducts = $WindowsInstaller.GetType().InvokeMember('Products', 'GetProperty', $null, $WindowsInstaller, $null)
-        Return $This.PRODUCTCODE -in $InstalledProducts
+        try {
+            $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+            $InstalledProducts = $WindowsInstaller.GetType().InvokeMember('Products', 'GetProperty', $null, $WindowsInstaller, $null) | ForEach-Object {$_ -replace '{','' -replace '}',''}
+            Return $This.PRODUCTCODE -in $InstalledProducts
+        }Catch {
+            Return $($This.PRODUCTNAME) -eq (Get-WMIObject -Class Win32_Product | Where-Object {$_.IdentifyingNumber -eq "{$($This.PRODUCTCODE)}"} | Select-Object -ExpandProperty 'Name')
+        }
+
+    }
+    [String] GetDetectionScript(){
+        $Script = @"
+`$(Get-WmiObject -Class Win32_Product | Where-Object {`$_.IdentifyingNumber -eq '{$($This.PRODUCTCODE)}'} | Select-Object -ExpandProperty 'Name') -eq '$($This.PRODUCTNAME)'
+"@
+        Return $Script
     }
 }
 Function Get-MSIFile {
     [CmdletBinding(DefaultParameterSetName='_byFile')]
     Param (
         [Parameter(Mandatory=$True,Position=0,ValueFromPipeline=$True,ParameterSetName='_byPath')]
-        [System.IO.Path] ${Path},
+        [System.IO.FileInfo] ${Path},
         [Parameter(Mandatory=$True,Position=0,ValueFromPipeline=$True,ParameterSetName='_byFile')]
         [ValidateScript({(Test-Path $_ -PathType Leaf) -and ($_.Extension -eq '.msi')})]
         [Alias('FullName','MSI','MSIPath')]
-        [System.IO.File] ${FilePath},
+        [System.IO.FileInfo] ${FilePath},
         [Parameter(Mandatory=$False,Position=1,ParameterSetName='_byFile')]
         [ValidateScript({($_ | Test-Path -PathType Leaf) -and ($_.Extension | ForEach-Object {$_ -eq '.mst'})})]
         [Alias('MST')]
-        [String[]] $MSTPaths
+        [System.IO.FileInfo[]] $MSTPaths
     )
     if ($PSCmdlet.ParameterSetName -eq '_byPath') {
         $MSIFiles = @(Get-ChildItem -Path $Path  -File -Recurse -Filter '*.msi')
