@@ -10,7 +10,7 @@ AAABAAQAEBAQAAEABAAoAQAARgAAABAQAAABAAgAaAUAAG4BAAAgIBAAAQAEAOgCAADWBgAAICAAAAEA
         $This.Name = Split-Path $Path -Leaf
         $Bytes = [IO.File]::ReadAllBytes($Path)
         $This.Content = [Convert]::ToBase64String($Bytes)
-				$This.FullName = $Path
+		$This.FullName = $Path
     }
     MSIIcon ($Name,$Content){
         $This.Name = $Name
@@ -30,10 +30,11 @@ AAABAAQAEBAQAAEABAAoAQAARgAAABAQAAABAAgAaAUAAG4BAAAgIBAAAQAEAOgCAADWBgAAICAAAAEA
         $This.Save($Path,$This.Name)
     }
     [String] ToString() {
-        Return "$($This.Name) -- $($This.Content.Substring(0,20))..."
+        # Return "$($This.Name) -- $($This.Content.Substring(0,20))..."
+        Return "$($This.Name)"
     }
 }
-Class MSIFile {
+Class _MSIFile {
     [String]    ${PRODUCTNAME}
     [String]    ${PRODUCTVERSION}
     [String]    ${MANUFACTURER}
@@ -216,11 +217,256 @@ Class MSIFile {
         Return $Script
     }
 }
+Class MSIFile {
+    [System.IO.FileInfo]    ${Path}
+    [System.IO.FileInfo[]]  ${Transforms}
+    [String]                ${ProductName}
+    [String]                ${ProductVersion}
+    [String]                ${Manufacturer}
+    [GUID]                  ${ProductCode}
+    [GUID]                  ${UpgradeCode}
+    [MSIIcon]               ${ARPProductIcon} = [MSIIcon]::new()
+    [System.IO.FileInfo]    ${LogFile}
+    MSIFile () {}
+    MSIFile ([System.IO.FileInfo] ${MSIPath}){
+        $this.Path = Get-Item -path $MSIPath -ErrorAction Stop # MSI should be unique
+        $this.init()
+    }
+    MSIFile ([System.IO.FileInfo] ${MSIPath},[System.IO.FileInfo[]] ${MSTPaths}){
+        $this.Path = Get-Item -path $MSIPath -ErrorAction Stop # MSI should be unique
+        $this.Transforms = $MSTPaths | Get-Item -ErrorAction Ignore # There can be several MST Files or none
+        $this.init()
+    }
+    [void] init() {
+        $this.__retrieveInfo()
+        $this.__getIcon()
+    }
+    Hidden [void] __retrieveInfo() {
+        # retrieve the properties from the MSI
+        # the properties to extract
+        $PropertiesName = @('ProductName','ProductVersion','Manufacturer','ProductCode','UpgradeCode','ARPPRODUCTICON')
+        # initialize the WindowsInstaller object
+        $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+        try {
+            # Open (0 = read) the MSI File and get the database
+            $MSIDatabase = $WindowsInstaller.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $WindowsInstaller, @($this.Path.FullName, 0))
+        }Catch{
+            throw 'Unable to open the MSI File be sure the file is not open in another application'
+        }
+        $IsUsingTransform = $False
+        if ($this.Transforms.count -ne 0) {
+            $IsUsingTransform = $True
+            ForEach ($MSTFile in $this.Transforms) {
+                # Apply each of the transform in the given order in case the properties are overwritten by the MST
+                $MSIDatabase.GetType().InvokeMember('ApplyTransform','InvokeMethod',$null,$MSIDatabase,@($MSTFile.FullName,0x0100))
+            }
+        }
+        $View = $Null
+        #Read the MSI Properties
+        ForEach ($Property in $PropertiesName) {
+            # Query the MSI database to get the value of the property
+            $Query = "SELECT Value FROM Property WHERE Property = '$($Property)'"
+            $View = $MSIDatabase.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $MSIDatabase, ($Query))
+            $View.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $View, $null) | out-null
+            $Record = $View.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $View, $null)
+            try {
+                $Value = $Record.GetType().InvokeMember('StringData', 'GetProperty', $null, $Record, 1)
+                if ($Property -eq 'ARPPRODUCTICON') {
+                    # handle the ARPPRODUCTICON property separately
+                    $This.ARPProductIcon.Name = ($Value.replace('\','_')).replace('/','_')
+                }else{
+                    # Set the property value to the value retrieved from the MSI database and replace the invalid characters (\/) in the property value with '_'
+                    $This.$Property = ($Value.replace('\','_')).replace('/','_')
+                }
+            }catch {
+                Write-Warning "Unable to read property [$($Property)] from MSI File : $_"
+            }
+            $view.GetType().InvokeMember('Close', 'InvokeMethod', $null, $View, $null)
+        }
+        if ($IsUsingTransform -eq $True) {
+            #Read eventual change made to these properties in the MST, transform change are stored in _TransformView table
+            ForEach ($Property in $PropertiesName) {
+                $Value = $Null
+                $Query = "SELECT Data FROM _TransformView WHERE Row = '$($Property)'"
+                $View = $MSIDatabase.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $MSIDatabase, ($Query))
+                $View.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $View, $null) | out-null
+                $Record = $View.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $View, $null)
+                try {
+                    $Value = $Record.GetType().InvokeMember('StringData', 'GetProperty', $null, $Record, 1)
+                    Write-Warning "INFO : The property [$($Property)] is overriden in an MST [$($This.$Property)] => [$($Value)]"
+                    if ($Property -eq 'ARPPRODUCTICON') {
+                        $This.ARPProductIcon.Name = $Value
+                    }else{
+                        $This.$Property = $Value
+                    }
+                }catch {
+                }
+            }
+        }
+        # Commit the changes to the MSI database
+        $MSIDatabase.GetType().InvokeMember('Commit', 'InvokeMethod', $null, $MSIDatabase, $null) | out-null
+        # Close the view
+        $View.GetType().InvokeMember('Close', 'InvokeMethod', $null, $View, $null) | Out-Null
+        #Release the COM objects
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($View) | Out-Null
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($MSIDatabase) | Out-Null
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($WindowsInstaller) | Out-Null
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+        $MSIDatabase = $null
+        $View = $null
+    }
+    hidden [void] __getIcon() {
+        $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+        $MSIDatabase = $WindowsInstaller.GetType().InvokeMember('OpenDatabase','InvokeMethod', $null, $WindowsInstaller, @($this.Path.FullName,0))
+        $Query = "SELECT Name, Data FROM Icon WHERE Name = '$($This.ARPProductIcon.Name)'"
+        $IconExist = $False
+        $View = $Null
+        Try {
+            $View = $MSIDatabase.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $MSIDatabase, ($Query)) # Open the view to the Icon table in the MSI file to get the icon using the ARPPRODUCTICON query
+            $IconExist = $True
+        }Catch {
+            $IconExist = $False
+        }
+        if ($IconExist -eq $True) {
+            $View.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $View, $null) | out-null
+            $Record = $View.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $View, $null)
+            $msiReadStreamAnsi = 1
+            try {
+                [String] $IconName = $Record.GetType().InvokeMember('StringData', 'GetProperty', $null, $Record, 1)
+                $DataSize = $Record.GetType().InvokeMember('DataSize', 'GetProperty', $null, $Record, 2)
+                if (($IconName.EndsWith('.ico') -eq $False) -and ($IconName.EndsWith('.exe') -eq $False)) {
+                    # no file type or not ico or exe assume the file is readable using ico approach
+                    $this.ARPProductIcon.Name = "$($IconName).ico"
+                }
+                $TempFile = New-TemporaryFile
+                $Stream = $Record.GetType().InvokeMember('ReadStream','InvokeMethod',$Null,$Record,@(2, $DataSize, $msiReadStreamAnsi)) # Read the stream from the MSI
+                $FileStream = new-object IO.FileStream($TempFile.FullName, [IO.FileMode]::Create) # New FileStream to some file
+                $StreamWriter = new-object IO.StreamWriter($FileStream,[System.Text.Encoding]::GetEncoding(28591)) # A streamwriter will write to the file via filestream above with the encoding 28591 (ISO-8859-1)
+                $StreamWriter.WriteLine($Stream) # Write stream to the file via streamwriter
+                $StreamWriter.Close() # Close writer
+                $FileStream.Close() # Close stream
+
+                if ($this.ARPProductIcon.Name.EndsWith('.exe') -eq $true) {
+                    # the file will be an exe so the icon have to be extracted from that exe using [System.Drawing.Icon]::ExtractAssociatedIcon method
+                    $ico =  [System.Drawing.Icon]::ExtractAssociatedIcon("$($TempFile.FullName)")
+                    $Ico.ToBitmap().Save("$($TempFile.FullName)")
+                    $EncodedData = [convert]::ToBase64String((Get-Content -Path $TempFile.FullName -Encoding Byte))
+                    $this.ARPProductIcon.Name =$this.ARPProductIcon.Name -Replace '.exe','.ico'
+                    $this.ARPProductIcon.Content = $EncodedData
+                }Elseif ($this.ARPProductIcon.Name.EndsWith('.ico') -eq $true) {
+                    # the file is allready of image type
+                    $EncodedData = [Convert]::ToBase64String([IO.File]::ReadAllBytes($TempFile.FullName)) # Convert the file to base64
+                    $this.ARPProductIcon.Name = $IconName
+                    $this.ARPProductIcon.Content = $EncodedData
+                }
+                $TempFile.Delete()
+            }Catch{
+                Throw $_
+            }
+            #Release the COM objects
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($View) | Out-Null
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($MSIDatabase) | Out-Null
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($WindowsInstaller) | Out-Null
+
+        }else{
+            #There is no ARPPRODUCTICON in the MSI => integrate the default MSI ico
+            $this.ARPProductIcon = [MSIIcon]::new()
+        }
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+    }
+    [Boolean] Install(){
+        if ($this.IsInstalled() -eq $false) {
+            Write-Verbose 'Installing the product'
+            $Command = $this.GetDefaultInstallCommand()
+            $Process = Start-Process -FilePath 'msiexec' -ArgumentList $Command -Wait -PassThru
+            return $Process.ExitCode -eq 0
+        }else{
+            Write-Warning "The product [$($this.ProductName)] in version [$($this.ProductVersion)] is already installed"
+            return $true
+        }
+    }
+    [Boolean] Remove() {
+        if ($this.IsInstalled() -eq $true) {
+            Write-Verbose 'Removing the product'
+            $Command = $this.GetDefaultUninstallCommand()
+            $Process = Start-Process -FilePath 'msiexec' -ArgumentList $Command -Wait -PassThru
+            return $Process.ExitCode -eq 0
+        }else{
+            Write-Warning "The product [$($this.ProductName)] in version [$($this.ProductVersion)] is not installed"
+            return $true
+        }
+    }
+    [Boolean] Repair(){
+        if ($this.IsInstalled() -eq $true) {
+            Write-Verbose 'Repairing the product'
+            $RemoveResult = $this.Remove()
+            $InstallResult = $this.Install()
+            return $RemoveResult -and $InstallResult
+        }else{
+            Write-Warning "The product [$($this.ProductName)] in version [$($this.ProductVersion)] is not installed"
+            return $true
+        }
+    }
+    [Boolean] IsInstalled(){
+        try {
+            $WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+            $InstalledProducts = $WindowsInstaller.GetType().InvokeMember('Products', 'GetProperty', $null, $WindowsInstaller, $null) | ForEach-Object {$_ -replace '{','' -replace '}',''}
+            Return $This.PRODUCTCODE -in $InstalledProducts
+        }Catch {
+            # if the COM object is not available use the WMI to get the installed products
+            Return $($This.PRODUCTNAME) -eq (Get-WMIObject -Class Win32_Product | Where-Object {$_.IdentifyingNumber -eq "{$($This.PRODUCTCODE)}"} | Select-Object -ExpandProperty 'Name')
+        }
+
+    }
+    [String] GetWMIDetectionScript(){
+        $Script = @"
+`$(Get-WmiObject -Class Win32_Product | Where-Object {`$_.IdentifyingNumber -eq '{$($This.PRODUCTCODE)}'} | Select-Object -ExpandProperty 'Name') -eq '$($This.PRODUCTNAME)'
+"@
+        Return $Script
+    }
+    [String] GetWindowsInstallerDetectionScript(){
+        $Script = @"
+`$WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+`$InstalledProducts = `$WindowsInstaller.GetType().InvokeMember('Products', 'GetProperty', `$null, `$WindowsInstaller, `$null) | ForEach-Object {`$_ -replace '{','' -replace '}',''}
+Return '$($This.PRODUCTCODE)' -in `$InstalledProducts
+"@
+        Return $Script
+    }
+    [String] GetDefaultInstallCommand(){
+        if ($this.Path) {
+            if ($this.LogFile) {
+                $Command = "msiexec /i $($this.Path.FullName) /qn /l*v+ $($this.LogFile.FullName)"
+            }Else{
+                $Command = "msiexec /i $($this.path.FullName) /qn"
+            }
+            return $Command
+        }else{
+            throw 'The MSI Path is not set'
+        }
+        
+    }
+    [String] GetDefaultUninstallCommand(){
+        if ($this.ProductCode) {
+            if ($this.LogFile) {
+                $Command = "msiexec /x $($this.ProductCode) /qn /l*v+ $($this.LogFile.FullName)"
+            }Else{
+                $Command = "msiexec /x $($this.ProductCode) /qn"
+            }
+            return $Command
+        }else{
+            throw 'The ProductCode is not set'
+        }
+        
+    }
+}
 Function Get-MSIFile {
     [CmdletBinding(DefaultParameterSetName='_byFile')]
     Param (
-        [Parameter(Mandatory=$True,Position=0,ValueFromPipeline=$True,ParameterSetName='_byPath')]
-        [System.IO.FileInfo] ${Path},
+        [Parameter(Mandatory=$True,Position=0,ParameterSetName='_byPath')]
+        [ValidateScript({(Test-Path $_ -PathType Container)})]
+        [System.IO.DirectoryInfo] ${Path},
         [Parameter(Mandatory=$True,Position=0,ValueFromPipeline=$True,ParameterSetName='_byFile')]
         [ValidateScript({(Test-Path $_ -PathType Leaf) -and ($_.Extension -eq '.msi')})]
         [Alias('FullName','MSI','MSIPath')]

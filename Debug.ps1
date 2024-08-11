@@ -16,6 +16,9 @@ $ErrorActionPreference = 'Stop'
 $VerbosePreference = 'Continue'
 $MSIFile = "C:\Users\cyber\Downloads\inkscape-1.3.2_2023-11-25_091e20e-x64.msi"
 $MSI = Get-MSIFile -FilePath $MSIFile
+$MSI
+
+# git add --all;Git commit -a -am 'Initial Commit';Git push
 
 ##################################
 # End of the tests show metrics #
