@@ -253,19 +253,16 @@ Return '$($This.PRODUCTCODE)' -in `$InstalledProducts
     }
     [String] GetDefaultInstallCommand(){
         if ($this.Path) {
-            if ($this.LogFile) {
-                $Command = @"
-IF NOT EXIST $($this.LogFile.Directory.FullName) MD $($this.LogFile.Directory.FullName)
-MSIEXEC /i $($this.Path.FullName) /qn /l*v+ $($this.LogFile.FullName)
-Exit ERRORLEVEL
-"@
-            }Else{
-                $Command = @"
-MSIEXEC /i $($this.path.FullName) /qn
-Exit ERRORLEVEL
-"@
+            $Command = @('/i',$($this.Path.FullName))
+            if ($this.Transforms) {
+                $TransformsCMD = "TRANSFORMS=$($this.Transforms -join ';')"
+                $Command += $TransformsCMD
             }
-            return $Command
+            $Command += '/qn'
+            if ($this.LogFile) {
+                $Command += "/l*v+ $($this.LogFile.FullName)"
+            }
+            return $($Command -join ' ')
         }else{
             throw 'The MSI Path is not set'
         }
@@ -273,19 +270,11 @@ Exit ERRORLEVEL
     }
     [String] GetDefaultUninstallCommand(){
         if ($this.ProductCode) {
+            $Command = @('/x',$($this.ProductCode),'/qn')
             if ($this.LogFile) {
-                $Command = @"
-IF NOT EXIST $($this.LogFile.Directory.FullName) MD $($this.LogFile.Directory.FullName)
-MSIEXEC /x $($this.ProductCode) /qn /l*v+ $($this.LogFile.FullName)
-Exit ERRORLEVEL
-"@
-            }Else{
-                $Command = @"
-MSIEXEC /x $($this.ProductCode) /qn
-Exit ERRORLEVEL
-"@
+                $Command += "/l*v+ $($this.LogFile.FullName)"
             }
-            return $Command
+            return $($Command -join ' ')
         }else{
             throw 'The ProductCode is not set'
         }
@@ -321,7 +310,7 @@ Function Get-MSIFile {
     }
     Return $MSI
 }
-
+#region expose the classes
 # register the classes
 # Define the types to export with type accelerators.
 $ExportableTypes =@(
@@ -359,3 +348,4 @@ $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
         $TypeAcceleratorsClass::Remove($Type.FullName)
     }
 }.GetNewClosure()
+#endregion expose the classes
