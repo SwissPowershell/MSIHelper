@@ -304,7 +304,7 @@ Function Get-MSIFile {
             Write-Error "No MSI file found in the path [$($Path)]"
             Return
         }
-        $MSI = [MSIFile]::new($MSTFiles[0],$MSTFiles)
+        $MSI = [MSIFile]::new($MSIFiles[0],$MSTFiles)
     }Else{
         $MSI = [MSIFile]::new($FilePath,$MSTPaths)
     }
