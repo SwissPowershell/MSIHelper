@@ -238,12 +238,14 @@ Class MSIFile {
 
     }
     [String] GetWMIDetectionScript(){
+        # this method should be slower than the WindowsInstaller method but it is more reliable and shorter
         $Script = @"
 `$(Get-WmiObject -Class Win32_Product | Where-Object {`$_.IdentifyingNumber -eq '{$($This.PRODUCTCODE)}'} | Select-Object -ExpandProperty 'Name') -eq '$($This.PRODUCTNAME)'
 "@
         Return $Script
     }
     [String] GetWindowsInstallerDetectionScript(){
+        # This method should be quicker than the WMI method
         $Script = @"
 `$WindowsInstaller = New-Object -ComObject WindowsInstaller.Installer
 `$InstalledProducts = `$WindowsInstaller.GetType().InvokeMember('Products', 'GetProperty', `$null, `$WindowsInstaller, `$null) | ForEach-Object {`$_ -replace '{','' -replace '}',''}
