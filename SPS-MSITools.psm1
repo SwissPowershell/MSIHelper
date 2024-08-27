@@ -255,14 +255,14 @@ Return '$($This.PRODUCTCODE)' -in `$InstalledProducts
     }
     [String] GetDefaultInstallCommand(){
         if ($this.Path) {
-            $Command = @('/i',$($this.Path.FullName))
+            $Command = @('/i',"'$($this.Path.FullName)'")
             if ($this.Transforms) {
-                $TransformsCMD = "TRANSFORMS=$($this.Transforms -join ';')"
+                $TransformsCMD = "TRANSFORMS=$(($this.Transforms | ForEach-Object {"'$($_)'"}) -join ';')"
                 $Command += $TransformsCMD
             }
             $Command += '/qn'
             if ($this.LogFile) {
-                $Command += "/l*v+ $($this.LogFile.FullName)"
+                $Command += "/l*v+ '$($this.LogFile.FullName)'"
             }
             return $($Command -join ' ')
         }else{
